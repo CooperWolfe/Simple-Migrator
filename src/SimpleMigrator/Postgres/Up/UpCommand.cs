@@ -97,6 +97,8 @@ namespace SimpleMigrator.Postgres.Up
             var initMigrationScriptName = resources.Single(res => res.Contains(InitScriptName));
             using var initMigrationScriptStream = assembly.GetManifestResourceStream(initMigrationScriptName)!;
             using var initMigrationScriptReader = new StreamReader(initMigrationScriptStream);
+
+            Console.WriteLine("Enabling migrations");
             connection.Execute(initMigrationScriptReader.ReadToEnd());
             connection.Execute(
                 @"INSERT INTO migration.script (name, created_at) VALUES (@name, NOW() at time zone 'utc')",
