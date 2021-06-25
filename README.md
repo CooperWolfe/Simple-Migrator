@@ -10,5 +10,8 @@ migrate postgres up|down --connection-string <postgres connection string> --fold
 
 Migration files are executed in order, so a date-related naming convention is recommended, but not required. See the [example migrations folder](example/).
 
+## Databases Supported
+- Postgres
+
 ## Contribution
 While you have every right to fork this repo and run away with it, I would really appreciate comments and pull requests if you have ideas!
