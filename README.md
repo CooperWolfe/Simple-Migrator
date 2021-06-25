@@ -5,7 +5,7 @@ This is intended to be installed as a [dotnet tool](https://docs.microsoft.com/e
 
 ## Usage
 ``` bash
-dotnet postgres up|down --connection-string <postgres connection string> --folder <folder of migration files> [--to <migration name to stop at>]
+migrate postgres up|down --connection-string <postgres connection string> --folder <folder of migration files> [--to <migration name to stop at>]
 ```
 
 Migration files are executed in order, so a date-related naming convention is recommended, but not required. See the [example migrations folder](example/).
