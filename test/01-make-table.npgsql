@@ -1,0 +1,5 @@
+create schema temp;
+create table temp.temp (
+    id serial primary key,
+    name char(5) not null
+);

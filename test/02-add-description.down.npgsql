@@ -1,0 +1,2 @@
+alter table temp.temp
+drop column description;

@@ -5,20 +5,18 @@ using System.CommandLine.Invocation;
 using System.Data;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using Dapper;
 using Npgsql;
 
-namespace SimpleMigrator.Postgres.Up
+namespace SimpleMigrator.Postgres.Down
 {
-    class UpCommand : Command
+    class DownCommand : Command
     {
         private const string ConnectionStringOptionName = "--connection-string";
         private const string FolderOptionName = "--folder";
         private const string ToOptionName = "--to";
-        private const string InitScriptName = "20210624-01-init-migration-scripts";
         
-        public UpCommand() : base("up", "Migrates the postgres database forward")
+        public DownCommand() : base("down", "Migrates the postgres database forward")
         {
             var connectionStringOption = new Option<string?>(
                 ConnectionStringOptionName,
@@ -36,14 +34,14 @@ namespace SimpleMigrator.Postgres.Up
 
             var toOption = new Option<string?>(
                 ToOptionName,
-                description: "The migration to migrate the database up to",
+                description: "The down migration to migrate down to",
                 arity: ArgumentArity.ZeroOrOne);
             AddOption(toOption);
-
-            Handler = CommandHandler.Create<string?, DirectoryInfo?, string?>(Up);
+            
+            Handler = CommandHandler.Create<string?, DirectoryInfo?, string?>(Down);
         }
 
-        private static void Up(string? connectionString, DirectoryInfo? folder, string? to)
+        private static void Down(string? connectionString, DirectoryInfo? folder, string? to)
         {
             if (!ValidateArgs(connectionString, folder))
             {
@@ -51,20 +49,26 @@ namespace SimpleMigrator.Postgres.Up
             }
 
             using var connection = new NpgsqlConnection(connectionString!);
-            EnsureMigrationsTableExists(connection);
+            CheckForMigrationTable(connection);
 
             var executedScripts = connection.Query<string>("SELECT name FROM migration.script");
+            if (!string.IsNullOrWhiteSpace(to))
+            {
+                if (to.EndsWith(".down")) to = to[..^5];
+                if (!executedScripts.Contains(to))
+                {
+                    WriteError($@"Migration ""{to}"" does not exist");
+                    return;
+                }
+            }
+
             var filesToExecute = folder!.GetFiles()
                 .Select(file => (path: file.FullName, migrationName: Path.GetFileNameWithoutExtension(file.FullName)!))
-                .Where(tuple => !executedScripts.Contains(tuple.migrationName) && !tuple.migrationName.EndsWith(".down"))
-                .Where(tuple => string.IsNullOrWhiteSpace(to) || string.Compare(tuple.migrationName, to) <= 0)
-                .OrderBy(tuple => tuple.migrationName);
-
-            if (!string.IsNullOrWhiteSpace(to) && filesToExecute.All(tuple => tuple.migrationName != to))
-            {
-                WriteError($@"Migration ""{to}"" does not exist.");
-                return;
-            }
+                .Where(tuple => tuple.migrationName.EndsWith(".down"))
+                .Select(tuple => (path: tuple.path, migrationName: tuple.migrationName[..^5]))
+                .Where(tuple => executedScripts.Contains(tuple.migrationName))
+                .Where(tuple => string.IsNullOrWhiteSpace(to) || string.Compare(tuple.migrationName, to) > 0)
+                .OrderByDescending(tuple => tuple.migrationName);
 
             if (!filesToExecute.Any())
             {
@@ -74,33 +78,24 @@ namespace SimpleMigrator.Postgres.Up
 
             foreach (var fileInfo in filesToExecute)
             {
-                Console.WriteLine($"Upgrading: {fileInfo.migrationName}");
+                Console.WriteLine($"Downgrading: {fileInfo.migrationName}");
                 connection.Execute(File.ReadAllText(fileInfo.path));
                 connection.Execute(
-                    @"INSERT INTO migration.script (name, created_at) VALUES (@name, NOW() at time zone 'utc')",
+                    @"DELETE FROM migration.script WHERE name = @name",
                     new { name = fileInfo.migrationName });
             }
 
             Console.WriteLine("Done!");
         }
 
-        private static void EnsureMigrationsTableExists(NpgsqlConnection connection)
+        private static void CheckForMigrationTable(NpgsqlConnection connection)
         {
             bool tableExists = connection.ExecuteScalar<int>(@"SELECT count(1) FROM information_schema.tables WHERE table_schema = 'migration' AND table_name = 'script'") > 0;
-            if (tableExists)
+            if (!tableExists)
             {
+                WriteError("Database does not contain a migration table.");
                 return;
             }
-
-            var assembly = Assembly.GetExecutingAssembly();
-            var resources = assembly.GetManifestResourceNames();
-            var initMigrationScriptName = resources.Single(res => res.Contains(InitScriptName));
-            using var initMigrationScriptStream = assembly.GetManifestResourceStream(initMigrationScriptName)!;
-            using var initMigrationScriptReader = new StreamReader(initMigrationScriptStream);
-            connection.Execute(initMigrationScriptReader.ReadToEnd());
-            connection.Execute(
-                @"INSERT INTO migration.script (name, created_at) VALUES (@name, NOW() at time zone 'utc')",
-                new { name = InitScriptName });
         }
 
         private static bool ValidateArgs(string? connectionString, DirectoryInfo? folder)
